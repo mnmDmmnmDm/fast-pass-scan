@@ -3,54 +3,66 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Експрес Сканер Роутерів v3</title>
+    <title>Експрес Сканер Роутерів v4</title>
     <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
     <style>
         body { font-family: sans-serif; margin: 0; padding: 0; background: #000; color: white; overflow: hidden; }
         
-        /* Відеопотік */
-        #video-container { position: relative; width: 100vw; height: 45vh; background: #000; }
+        /* Відеопотік (зменшили до 35vh, щоб звільнити місце кнопкам) */
+        #video-container { position: relative; width: 100vw; height: 35vh; background: #000; }
         video { width: 100%; height: 100%; object-fit: cover; }
         
-        /* Рамка сканування */
+        /* Нова рамка сканування: вужча та вища */
         #scanner-overlay {
             position: absolute; top: 0; left: 0; width: 100%; height: 100%;
             display: flex; align-items: center; justify-content: center;
             box-sizing: border-box; pointer-events: none;
         }
         #reticle {
-            width: 50%; height: 100px;
+            width: 65%; height: 85px; /* Вужча та вища */
             border: 3px solid #00ff00; border-radius: 8px;
             box-shadow: 0 0 0 1000px rgba(0, 0, 0, 0.6);
             position: relative;
         }
         #reticle::before {
-            content: "Помістіть рядок 'Password:' сюди"; position: absolute; top: -25px; left: 0;
-            color: #00ff00; font-size: 13px; font-weight: bold; width: 100%; text-align: center;
+            content: "Наведіть 'Password:' сюди"; position: absolute; top: -22px; left: 0;
+            color: #00ff00; font-size: 11px; font-weight: bold; width: 100%; text-align: center;
         }
 
         /* Очі сканера */
         #preview-container {
-            position: absolute; bottom: 10px; right: 10px; width: 120px; height: 35px;
+            position: absolute; bottom: 8px; right: 8px; width: 100px; height: 40px;
             border: 2px solid red; z-index: 100; background: black; border-radius: 4px; overflow: hidden;
         }
         #crop-canvas { width: 100%; height: 100%; object-fit: contain; }
 
-        /* Панель керування */
-        #controls { height: 55vh; background: #fff; color: #333; padding: 12px; box-sizing: border-box; position: relative; z-index: 10; display: flex; flex-direction: column; justify-content: space-between; }
-        .header { font-size: 15px; font-weight: bold; display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;}
-        #status { font-size: 13px; color: #666; font-weight: normal;}
+        /* Панель керування (збільшили до 65vh) */
+        #controls { 
+            height: 65vh; background: #fff; color: #333; 
+            padding: 10px 15px; box-sizing: border-box; 
+            position: relative; z-index: 10; 
+            display: flex; flex-direction: column; justify-content: space-between; 
+        }
+        .header { font-size: 14px; font-weight: bold; display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;}
+        #status { font-size: 12px; color: #666; font-weight: normal;}
         
-        #camera-select { width: 100%; padding: 8px; border-radius: 8px; border: 1px solid #ccc; font-size: 14px; margin-bottom: 8px; background: #fff; }
+        #camera-select { width: 100%; padding: 6px; border-radius: 6px; border: 1px solid #ccc; font-size: 13px; margin-bottom: 6px; background: #fff; }
         
         /* Зум слайдер */
-        .zoom-container { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; font-size: 14px; font-weight: bold; }
-        #zoom-range { flex-grow: 1; height: 8px; }
+        .zoom-container { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; font-size: 13px; font-weight: bold; }
+        #zoom-range { flex-grow: 1; height: 6px; }
 
-        #passwords-list { width: 100%; flex-grow: 1; height: 80px; box-sizing: border-box; padding: 8px; border: 1px solid #ccc; border-radius: 8px; font-family: monospace; font-size: 15px; resize: none; margin-bottom: 8px; }
+        #passwords-list { 
+            width: 100%; flex-grow: 1; height: 60px; 
+            box-sizing: border-box; padding: 6px; 
+            border: 1px solid #ccc; border-radius: 6px; 
+            font-family: monospace; font-size: 14px; 
+            resize: none; margin-bottom: 6px; 
+        }
         
-        .btn-group { display: flex; gap: 8px; }
-        .btn { flex: 1; padding: 12px; border: none; border-radius: 8px; font-size: 14px; font-weight: bold; cursor: pointer; text-align: center; text-decoration: none;}
+        /* Кнопки стали більш компактними */
+        .btn-group { display: flex; gap: 6px; }
+        .btn { flex: 1; padding: 10px; border: none; border-radius: 6px; font-size: 13px; font-weight: bold; cursor: pointer; text-align: center; text-decoration: none;}
         .btn-success { background: #25D366; color: white; }
         .btn-secondary { background: #f0f2f5; color: #333; border: 1px solid #ccc;}
     </style>
@@ -70,10 +82,10 @@
     <div id="controls">
         <div>
             <div class="header">
-                <span>Камера:</span>
+                <span>Оберіть задню камеру (2, 3 або 4):</span>
                 <span id="status">Запуск...</span>
             </div>
-            <select id="camera-select"><option>Шукаємо камери...</option></select>
+            <select id="camera-select"><option>Пошук камер...</option></select>
             
             <div class="zoom-container" id="zoom-control-box" style="display: none;">
                 <span>🔎 Зум:</span>
@@ -121,34 +133,46 @@
                 tessedit_pageseg_mode: Tesseract.PSM.SINGLE_LINE,
             });
             
-            statusDiv.innerText = "🟢 Сканування активне";
+            statusDiv.innerText = "🟢 Активно";
             statusDiv.style.color = "green";
             startScanningLoop();
         }
 
-        // 2. Ініціалізація камер
+        // 2. Ініціалізація камер (З приховуванням фронтальної)
         async function initCameraSystem() {
             try {
-                // Отримуємо базовий доступ
+                // Отримуємо початковий доступ
                 currentStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio: false });
                 video.srcObject = currentStream;
                 await video.play();
 
-                // Отримуємо повний список пристроїв без фільтрації
                 const devices = await navigator.mediaDevices.enumerateDevices();
                 const videoDevices = devices.filter(device => device.kind === 'videoinput');
 
+                // ФІЛЬТРАЦІЯ: прибираємо камери, що місткомовні до фронтальних
+                const backDevices = videoDevices.filter(device => {
+                    const label = device.label.toLowerCase();
+                    return !label.includes('front') && 
+                           !label.includes('передн') && 
+                           !label.includes('selfie') && 
+                           !label.includes('user');
+                });
+
+                // Якщо фільтр прибрав взагалі все (наприклад, немає міток), повертаємо весь список
+                const finalDevices = backDevices.length > 0 ? backDevices : videoDevices;
+
                 cameraSelect.innerHTML = "";
-                videoDevices.forEach((device, index) => {
+                finalDevices.forEach((device, index) => {
                     const option = document.createElement('option');
                     option.value = device.deviceId;
-                    option.text = device.label || `Камера ${index + 1} (ID: ..${device.deviceId.slice(-4)})`;
+                    // Гарне та зрозуміле підписування камер
+                    option.text = device.label || `Задня камера ${index + 1}`;
                     cameraSelect.appendChild(option);
                 });
 
-                // Спробуємо підключитися до останньої камери в списку (зазвичай це задня основна/теле)
-                if (videoDevices.length > 0) {
-                    cameraSelect.selectedIndex = videoDevices.length - 1;
+                // Обираємо першу доступну задню камеру зі списку
+                if (finalDevices.length > 0) {
+                    cameraSelect.selectedIndex = 0;
                     await switchCamera(cameraSelect.value);
                 }
 
@@ -160,13 +184,13 @@
             }
         }
 
-        // 3. Перемикання камери + Активація ЗУМУ
+        // 3. Надійне перемикання камери
         async function switchCamera(deviceId) {
             if (currentStream) {
                 currentStream.getTracks().forEach(track => track.stop());
             }
 
-            statusDiv.innerText = "🔄 Зміна об'єктива...";
+            statusDiv.innerText = "🔄 Зміна камери...";
             
             const constraints = {
                 video: {
@@ -181,14 +205,13 @@
                 currentStream = await navigator.mediaDevices.getUserMedia(constraints);
                 video.srcObject = currentStream;
                 await video.play();
-                statusDiv.innerText = "🟢 Сканування активне";
+                statusDiv.innerText = "🟢 Активно";
 
-                // НАЛАШТУВАННЯ ЗУМУ
+                // НАЛАШТУВАННЯ ЗУМУ (якщо задня камера його підтримує)
                 const track = currentStream.getVideoTracks()[0];
                 const capabilities = track.getCapabilities ? track.getCapabilities() : null;
 
                 if (capabilities && 'zoom' in capabilities) {
-                    // Показуємо слайдер
                     zoomControlBox.style.display = 'flex';
                     zoomRange.min = capabilities.zoom.min;
                     zoomRange.max = capabilities.zoom.max;
@@ -196,18 +219,17 @@
                     zoomRange.value = capabilities.zoom.min;
                     zoomVal.innerText = `${capabilities.zoom.min}x`;
 
-                    // Обробка руху повзунка
                     zoomRange.oninput = async (e) => {
                         const value = parseFloat(e.target.value);
                         zoomVal.innerText = `${value.toFixed(1)}x`;
                         await track.applyConstraints({ advanced: [{ zoom: value }] });
                     };
                 } else {
-                    zoomControlBox.style.display = 'none'; // Камера не підтримує програмний зум
+                    zoomControlBox.style.display = 'none';
                 }
 
             } catch (err) {
-                statusDiv.innerText = "❌ Помилка запуску об'єктива.";
+                statusDiv.innerText = "❌ Помилка цієї камери.";
                 statusDiv.style.color = "red";
             }
         }
@@ -225,7 +247,7 @@
             }, 600);
         }
 
-        // 5. Кроп кадру та розпізнавання за регулярним виразом
+        // 5. Кроп кадру та OCR
         async function processFrame() {
             isProcessing = true;
             
@@ -274,7 +296,7 @@
                 const { data: { text } } = await worker.recognize(base64Image);
                 const cleanText = text.trim();
                 
-                // ШУКАЄМО СТРОГО: Password: [ВЕЛИКІ ЛІТЕРИ ТА ЦИФРИ]
+                // Тільки Password: [A-Z0-9]
                 const regex = /password\s*:\s*([A-Z0-9]{4,20})/i;
                 const match = cleanText.match(regex);
 
@@ -301,19 +323,19 @@
             }
             passwordsList.value += pass;
             passwordsList.scrollTop = passwordsList.scrollHeight;
-            localStorage.setItem('router_passwords_list_v3', passwordsList.value);
+            localStorage.setItem('router_passwords_list_v4', passwordsList.value);
         }
         
         function clearList() {
             if(confirm("Очистити список?")) {
                 passwordsList.value = "";
-                localStorage.removeItem('router_passwords_list_v3');
+                localStorage.removeItem('router_passwords_list_v4');
                 lastScannedPassword = "";
             }
         }
 
         window.onload = () => {
-            const saved = localStorage.getItem('router_passwords_list_v3');
+            const saved = localStorage.getItem('router_passwords_list_v4');
             if (saved) passwordsList.value = saved;
             initCameraSystem();
         };
