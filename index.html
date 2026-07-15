@@ -3,10 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Експрес Сканер v6</title>
+    <title>Експрес Сканер v7</title>
     <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
     <style>
-        /* Жорстка посадка на весь екран без прокрутки сторінки */
         html, body { 
             height: 100%; margin: 0; padding: 0; 
             background: #000; color: white; 
@@ -14,18 +13,15 @@
             display: flex; flex-direction: column; 
         }
         
-        /* Ефект спалаху */
         #flash {
             position: absolute; top: 0; left: 0; width: 100vw; height: 100vh;
             background: white; opacity: 0; pointer-events: none; z-index: 9999;
             transition: opacity 0.25s ease-out;
         }
 
-        /* Відеопотік - строго 35% висоти */
         #video-container { position: relative; width: 100vw; height: 35%; background: #000; }
         video { width: 100%; height: 100%; object-fit: cover; }
         
-        /* Вузька рамка сканування */
         #scanner-overlay {
             position: absolute; top: 0; left: 0; width: 100%; height: 100%;
             display: flex; align-items: center; justify-content: center;
@@ -42,14 +38,12 @@
             color: #00ff00; font-size: 11px; font-weight: bold; width: 100%; text-align: center;
         }
 
-        /* Очі сканера */
         #preview-container {
             position: absolute; bottom: 8px; right: 8px; width: 100px; height: 35px;
             border: 2px solid red; z-index: 100; background: black; border-radius: 4px; overflow: hidden;
         }
         #crop-canvas { width: 100%; height: 100%; object-fit: contain; }
 
-        /* Панель керування - строго 65% висоти */
         #controls { 
             height: 65%; background: #fff; color: #333; 
             padding: 12px; box-sizing: border-box; 
@@ -60,14 +54,12 @@
         .header { font-size: 13px; font-weight: bold; display: flex; justify-content: space-between; align-items: center; margin-bottom: 2px;}
         #status { font-size: 12px; color: #666; font-weight: normal;}
         
-        /* Зум слайдер */
         .zoom-container { display: flex; align-items: center; gap: 8px; margin: 4px 0; font-size: 13px; font-weight: bold; }
         #zoom-range { flex-grow: 1; height: 6px; }
 
-        /* Вікно паролів строго на 5 рядків з прокруткою */
         #passwords-list { 
             width: 100%; 
-            height: 110px; /* 5 рядків * 20px line-height + padding */
+            height: 110px; 
             min-height: 110px;
             max-height: 110px;
             box-sizing: border-box; padding: 6px; 
@@ -75,13 +67,12 @@
             font-family: monospace; font-size: 14px; 
             line-height: 20px;
             resize: none; 
-            overflow-y: auto; /* Прокрутка якщо більше 5 рядків */
+            overflow-y: auto; 
             margin-bottom: 6px; 
             background: #fafafa;
             color: #111;
         }
         
-        /* Кнопки гарантовано внизу */
         .btn-group { display: flex; gap: 6px; width: 100%; }
         .btn { flex: 1; padding: 10px; border: none; border-radius: 6px; font-size: 13px; font-weight: bold; cursor: pointer; text-align: center; text-decoration: none;}
         .btn-success { background: #25D366; color: white; }
@@ -205,13 +196,10 @@
                 const track = currentStream.getVideoTracks()[0];
                 const capabilities = track.getCapabilities ? track.getCapabilities() : null;
 
-                // НАЛАШТУВАННЯ ЗУМУ З ДЕФОЛТОМ 3x
                 if (capabilities && 'zoom' in capabilities) {
                     const minZoom = capabilities.zoom.min;
                     const maxZoom = capabilities.zoom.max;
-                    
-                    // Обмежуємо 3x в межах доступного на залізі діапазону
-                    const startZoom = Math.max(minZoom, Math.min(maxZoom, 3.0));
+                    const startZoom = Math.max(minZoom, Math.min(maxZoom, 3.0)); // Ставимо 3х за дефолтом
 
                     zoomRange.min = minZoom;
                     zoomRange.max = maxZoom;
@@ -219,7 +207,6 @@
                     zoomRange.value = startZoom;
                     zoomVal.innerText = `${startZoom.toFixed(1)}x`;
 
-                    // Одразу застосовуємо 3x при запуску
                     try {
                         await track.applyConstraints({ advanced: [{ zoom: startZoom }] });
                     } catch(e) {
@@ -253,6 +240,7 @@
             }, 600);
         }
 
+        // ТОЧНИЙ РОЗРАХУНОК КООРДИНАТ З УРАХУВАННЯМ OBJECT-FIT: COVER
         async function processFrame() {
             isProcessing = true;
             
@@ -266,22 +254,42 @@
                 return;
             }
 
-            const scaleX = videoWidth / displayWidth;
-            const scaleY = videoHeight / displayHeight;
+            // Вираховуємо коефіцієнт масштабування та зміщення (offsets) через object-fit: cover
+            const videoRatio = videoWidth / videoHeight;
+            const displayRatio = displayWidth / displayHeight;
+            
+            let scale, xOffset = 0, yOffset = 0;
+            
+            if (displayRatio > videoRatio) {
+                // Відео обрізане зверху та знизу
+                scale = displayWidth / videoWidth;
+                yOffset = (videoHeight * scale - displayHeight) / 2;
+            } else {
+                // Відео обрізане зліва та справа
+                scale = displayHeight / videoHeight;
+                xOffset = (videoWidth * scale - displayWidth) / 2;
+            }
             
             const reticleRect = reticle.getBoundingClientRect();
             const videoRect = video.getBoundingClientRect();
             
-            const sx = (reticleRect.left - videoRect.left) * scaleX;
-            const sy = (reticleRect.top - videoRect.top) * scaleY;
-            const sw = reticleRect.width * scaleX;
-            const sh = reticleRect.height * scaleY;
+            // Позиція рамки відносно контейнера відео на екрані
+            const dx = reticleRect.left - videoRect.left;
+            const dy = reticleRect.top - videoRect.top;
+
+            // Точний перерахунок у координати чистого матричного кадру камери
+            const sx = (dx + xOffset) / scale;
+            const sy = (dy + yOffset) / scale;
+            const sw = reticleRect.width / scale;
+            const sh = reticleRect.height / scale;
 
             canvas.width = sw;
             canvas.height = sh;
 
+            // Малюємо ідеальний кроп
             ctx.drawImage(video, sx, sy, sw, sh, 0, 0, sw, sh);
             
+            // Контрастування
             const imgData = ctx.getImageData(0, 0, sw, sh);
             const data = imgData.data;
             for (let i = 0; i < data.length; i += 4) {
@@ -328,20 +336,20 @@
                 passwordsList.value += "\n";
             }
             passwordsList.value += pass;
-            passwordsList.scrollTop = passwordsList.scrollHeight; // Автоматичний скрол до нового рядка
-            localStorage.setItem('router_passwords_list_v6', passwordsList.value);
+            passwordsList.scrollTop = passwordsList.scrollHeight; 
+            localStorage.setItem('router_passwords_list_v7', passwordsList.value);
         }
         
         function clearList() {
             if(confirm("Очистити список?")) {
                 passwordsList.value = "";
-                localStorage.removeItem('router_passwords_list_v6');
+                localStorage.removeItem('router_passwords_list_v7');
                 lastScannedPassword = "";
             }
         }
 
         window.onload = () => {
-            const saved = localStorage.getItem('router_passwords_list_v6');
+            const saved = localStorage.getItem('router_passwords_list_v7');
             if (saved) {
                 passwordsList.value = saved;
                 passwordsList.scrollTop = passwordsList.scrollHeight;
