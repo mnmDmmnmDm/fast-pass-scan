@@ -3,34 +3,39 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Експрес Сканер v5</title>
+    <title>Експрес Сканер v6</title>
     <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
     <style>
-        body { font-family: sans-serif; margin: 0; padding: 0; background: #000; color: white; overflow: hidden; position: relative; }
+        /* Жорстка посадка на весь екран без прокрутки сторінки */
+        html, body { 
+            height: 100%; margin: 0; padding: 0; 
+            background: #000; color: white; 
+            overflow: hidden; 
+            display: flex; flex-direction: column; 
+        }
         
-        /* Візуальний спалах при успішному зчитуванні */
+        /* Ефект спалаху */
         #flash {
             position: absolute; top: 0; left: 0; width: 100vw; height: 100vh;
             background: white; opacity: 0; pointer-events: none; z-index: 9999;
-            transition: opacity 0.05s ease-out;
+            transition: opacity 0.25s ease-out;
         }
 
-        /* Відеопотік */
-        #video-container { position: relative; width: 100vw; height: 40vh; background: #000; }
+        /* Відеопотік - строго 35% висоти */
+        #video-container { position: relative; width: 100vw; height: 35%; background: #000; }
         video { width: 100%; height: 100%; object-fit: cover; }
         
-        /* Повернули вузьку рамку сканування */
+        /* Вузька рамка сканування */
         #scanner-overlay {
             position: absolute; top: 0; left: 0; width: 100%; height: 100%;
             display: flex; align-items: center; justify-content: center;
             box-sizing: border-box; pointer-events: none;
         }
         #reticle {
-            width: 85%; height: 50px; /* Попередні ідеальні параметри */
+            width: 85%; height: 50px;
             border: 3px solid #00ff00; border-radius: 8px;
             box-shadow: 0 0 0 1000px rgba(0, 0, 0, 0.6);
             position: relative;
-            transition: border-color 0.1s ease;
         }
         #reticle::before {
             content: "Наведіть 'Password:' сюди"; position: absolute; top: -22px; left: 0;
@@ -44,31 +49,41 @@
         }
         #crop-canvas { width: 100%; height: 100%; object-fit: contain; }
 
-        /* Панель керування (оптимізовано розміри під маленькі екрани) */
+        /* Панель керування - строго 65% висоти */
         #controls { 
-            height: 60vh; background: #fff; color: #333; 
-            padding: 8px 12px; box-sizing: border-box; 
-            position: relative; z-index: 10; 
-            display: flex; flex-direction: column; justify-content: space-between; 
+            height: 65%; background: #fff; color: #333; 
+            padding: 12px; box-sizing: border-box; 
+            display: flex; flex-direction: column; 
+            justify-content: space-between; 
         }
+        
         .header { font-size: 13px; font-weight: bold; display: flex; justify-content: space-between; align-items: center; margin-bottom: 2px;}
         #status { font-size: 12px; color: #666; font-weight: normal;}
         
-        /* Зум слайдер (тепер відображається завжди для зручності) */
+        /* Зум слайдер */
         .zoom-container { display: flex; align-items: center; gap: 8px; margin: 4px 0; font-size: 13px; font-weight: bold; }
         #zoom-range { flex-grow: 1; height: 6px; }
 
+        /* Вікно паролів строго на 5 рядків з прокруткою */
         #passwords-list { 
-            width: 100%; flex-grow: 1; height: 60px; 
+            width: 100%; 
+            height: 110px; /* 5 рядків * 20px line-height + padding */
+            min-height: 110px;
+            max-height: 110px;
             box-sizing: border-box; padding: 6px; 
             border: 1px solid #ccc; border-radius: 6px; 
             font-family: monospace; font-size: 14px; 
-            resize: none; margin-bottom: 6px; 
+            line-height: 20px;
+            resize: none; 
+            overflow-y: auto; /* Прокрутка якщо більше 5 рядків */
+            margin-bottom: 6px; 
+            background: #fafafa;
+            color: #111;
         }
         
-        /* Кнопки стали ще компактнішими */
-        .btn-group { display: flex; gap: 6px; }
-        .btn { flex: 1; padding: 8px; border: none; border-radius: 6px; font-size: 12px; font-weight: bold; cursor: pointer; text-align: center; text-decoration: none;}
+        /* Кнопки гарантовано внизу */
+        .btn-group { display: flex; gap: 6px; width: 100%; }
+        .btn { flex: 1; padding: 10px; border: none; border-radius: 6px; font-size: 13px; font-weight: bold; cursor: pointer; text-align: center; text-decoration: none;}
         .btn-success { background: #25D366; color: white; }
         .btn-secondary { background: #f0f2f5; color: #333; border: 1px solid #ccc;}
     </style>
@@ -90,14 +105,14 @@
     <div id="controls">
         <div>
             <div class="header">
-                <span>Використовуйте повзунок для активації 5x камери:</span>
+                <span>Масштабування камери:</span>
                 <span id="status">Запуск...</span>
             </div>
             
             <div class="zoom-container">
                 <span>🔎 Зум:</span>
-                <input type="range" id="zoom-range" min="1" max="10" step="0.5" value="1">
-                <span id="zoom-val">1.0x</span>
+                <input type="range" id="zoom-range" min="1" max="10" step="0.5" value="3">
+                <span id="zoom-val">3.0x</span>
             </div>
         </div>
         
@@ -129,7 +144,6 @@
         let scanTimer = null;
         let currentStream = null;
 
-        // Генерація звукового сигналу "БІП" за допомогою коду
         function playScanBeep() {
             try {
                 const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -140,30 +154,26 @@
                 gainNode.connect(audioCtx.destination);
                 
                 oscillator.type = 'sine';
-                oscillator.frequency.setValueAtTime(1000, audioCtx.currentTime); // Висока частота
-                gainNode.gain.setValueAtTime(0.15, audioCtx.currentTime); // Гучність
+                oscillator.frequency.setValueAtTime(1000, audioCtx.currentTime);
+                gainNode.gain.setValueAtTime(0.15, audioCtx.currentTime);
                 
                 oscillator.start();
-                // Швидке загасання звуку (за 0.12 секунди)
                 gainNode.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.12);
                 oscillator.stop(audioCtx.currentTime + 0.12);
             } catch (e) {
-                console.log("Audio API не підтримується або заблоковано браузером.");
+                console.log("Audio заблоковано.");
             }
         }
 
-        // Ефект спалаху екрана
         function triggerFlashEffect() {
             flash.style.transition = 'none';
-            flash.style.opacity = '0.8'; // Яскравий білий спалах
-            
+            flash.style.opacity = '0.8';
             setTimeout(() => {
                 flash.style.transition = 'opacity 0.25s ease-out';
-                flash.style.opacity = '0'; // Плавне зникнення
+                flash.style.opacity = '0';
             }, 50);
         }
 
-        // 1. OCR Налаштування
         async function initOCR() {
             statusDiv.innerText = "⏳ Налаштування OCR...";
             worker = await Tesseract.createWorker('eng', 1);
@@ -178,13 +188,12 @@
             startScanningLoop();
         }
 
-        // 2. Ініціалізація камери (завжди обираємо задню)
         async function initCameraSystem() {
             try {
                 statusDiv.innerText = "🔄 Запуск задньої камери...";
                 currentStream = await navigator.mediaDevices.getUserMedia({ 
                     video: { 
-                        facingMode: "environment", // Пріоритет задній камері
+                        facingMode: "environment", 
                         width: { ideal: 1920 },
                         height: { ideal: 1080 }
                     }, 
@@ -193,15 +202,29 @@
                 video.srcObject = currentStream;
                 await video.play();
 
-                // Налаштування повзунка зуму
                 const track = currentStream.getVideoTracks()[0];
                 const capabilities = track.getCapabilities ? track.getCapabilities() : null;
 
+                // НАЛАШТУВАННЯ ЗУМУ З ДЕФОЛТОМ 3x
                 if (capabilities && 'zoom' in capabilities) {
-                    zoomRange.min = capabilities.zoom.min;
-                    zoomRange.max = capabilities.zoom.max;
+                    const minZoom = capabilities.zoom.min;
+                    const maxZoom = capabilities.zoom.max;
+                    
+                    // Обмежуємо 3x в межах доступного на залізі діапазону
+                    const startZoom = Math.max(minZoom, Math.min(maxZoom, 3.0));
+
+                    zoomRange.min = minZoom;
+                    zoomRange.max = maxZoom;
                     zoomRange.step = capabilities.zoom.step || 0.1;
-                    zoomRange.value = capabilities.zoom.min;
+                    zoomRange.value = startZoom;
+                    zoomVal.innerText = `${startZoom.toFixed(1)}x`;
+
+                    // Одразу застосовуємо 3x при запуску
+                    try {
+                        await track.applyConstraints({ advanced: [{ zoom: startZoom }] });
+                    } catch(e) {
+                        console.log("Помилка стартового зуму:", e);
+                    }
                 }
 
                 zoomRange.oninput = async (e) => {
@@ -210,19 +233,18 @@
                     try {
                         await track.applyConstraints({ advanced: [{ zoom: value }] });
                     } catch(err) {
-                        console.log("Зум не застосувався апаратно:", err);
+                        console.log("Зум не застосувався:", err);
                     }
                 };
 
                 initOCR();
             } catch (err) {
-                statusDiv.innerText = "❌ Помилка камери. Перевірте HTTPS!";
+                statusDiv.innerText = "❌ Помилка камери.";
                 statusDiv.style.color = "red";
                 console.error(err);
             }
         }
 
-        // 3. Цикл сканування
         function startScanningLoop() {
             if (scanTimer) clearInterval(scanTimer);
             scanTimer = setInterval(async () => {
@@ -231,7 +253,6 @@
             }, 600);
         }
 
-        // 4. Кроп кадру та OCR
         async function processFrame() {
             isProcessing = true;
             
@@ -261,7 +282,6 @@
 
             ctx.drawImage(video, sx, sy, sw, sh, 0, 0, sw, sh);
             
-            // Чорно-білий фільтр для кращої контрастності
             const imgData = ctx.getImageData(0, 0, sw, sh);
             const data = imgData.data;
             for (let i = 0; i < data.length; i += 4) {
@@ -280,7 +300,6 @@
                 const { data: { text } } = await worker.recognize(base64Image);
                 const cleanText = text.trim();
                 
-                // Тільки Password: [A-Z0-9]
                 const regex = /password\s*:\s*([A-Z0-9]{4,20})/i;
                 const match = cleanText.match(regex);
 
@@ -288,10 +307,8 @@
                     const password = match[1];
 
                     if (password !== lastScannedPassword) {
-                        // СИГНАЛИ ПРО УСПІХ
-                        triggerFlashEffect(); // Спалах
-                        playScanBeep();       // Звук
-                        
+                        triggerFlashEffect(); 
+                        playScanBeep();       
                         addPasswordToList(password);
                         
                         reticle.style.borderColor = "#25D366";
@@ -311,21 +328,24 @@
                 passwordsList.value += "\n";
             }
             passwordsList.value += pass;
-            passwordsList.scrollTop = passwordsList.scrollHeight;
-            localStorage.setItem('router_passwords_list_v5', passwordsList.value);
+            passwordsList.scrollTop = passwordsList.scrollHeight; // Автоматичний скрол до нового рядка
+            localStorage.setItem('router_passwords_list_v6', passwordsList.value);
         }
         
         function clearList() {
             if(confirm("Очистити список?")) {
                 passwordsList.value = "";
-                localStorage.removeItem('router_passwords_list_v5');
+                localStorage.removeItem('router_passwords_list_v6');
                 lastScannedPassword = "";
             }
         }
 
         window.onload = () => {
-            const saved = localStorage.getItem('router_passwords_list_v5');
-            if (saved) passwordsList.value = saved;
+            const saved = localStorage.getItem('router_passwords_list_v6');
+            if (saved) {
+                passwordsList.value = saved;
+                passwordsList.scrollTop = passwordsList.scrollHeight;
+            }
             initCameraSystem();
         };
 
