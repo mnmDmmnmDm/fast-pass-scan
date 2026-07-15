@@ -3,46 +3,51 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Експрес Сканер Роутерів</title>
+    <title>Експрес Сканер Роутерів v2</title>
     <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
     <style>
         body { font-family: sans-serif; margin: 0; padding: 0; background: #000; color: white; overflow: hidden; }
         
-        /* Контейнер для відео */
-        #video-container { position: relative; width: 100vw; height: 60vh; background: #000; }
+        /* Відеопотік */
+        #video-container { position: relative; width: 100vw; height: 50vh; background: #000; }
         video { width: 100%; height: 100%; object-fit: cover; }
         
-        /* Візуальна рамка сканера */
+        /* Рамка сканування */
         #scanner-overlay {
             position: absolute; top: 0; left: 0; width: 100%; height: 100%;
             display: flex; align-items: center; justify-content: center;
-            box-sizing: border-box;
+            box-sizing: border-box; pointer-events: none;
         }
         #reticle {
-            width: 80%; height: 60px; /* Вузька область для пароля */
+            width: 85%; height: 50px;
             border: 3px solid #00ff00; border-radius: 8px;
-            box-shadow: 0 0 0 1000px rgba(0, 0, 0, 0.6); /* Затемнення навколо */
+            box-shadow: 0 0 0 1000px rgba(0, 0, 0, 0.6);
             position: relative;
         }
         #reticle::before {
-            content: "Наведіть на Password:"; position: absolute; top: -25px; left: 0;
-            color: #00ff00; font-size: 14px; font-weight: bold; width: 100%; text-align: center;
+            content: "Помістіть рядок 'Password:' сюди"; position: absolute; top: -25px; left: 0;
+            color: #00ff00; font-size: 13px; font-weight: bold; width: 100%; text-align: center;
         }
 
-        /* Нижня панель з результатами */
-        #controls { height: 40vh; background: #fff; color: #333; padding: 15px; box-sizing: border-box; border-top-radius: 15px; position: relative; z-index: 10; }
-        .header { font-size: 18px; font-weight: bold; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center;}
-        #status { font-size: 14px; color: #666; font-weight: normal;}
+        /* Очі сканера (прев'ю кропу в кутку) */
+        #preview-container {
+            position: absolute; bottom: 10px; right: 10px; width: 120px; height: 35px;
+            border: 2px solid red; z-index: 100; background: black; border-radius: 4px; overflow: hidden;
+        }
+        #crop-canvas { width: 100%; height: 100%; object-fit: contain; }
+
+        /* Панель керування */
+        #controls { height: 50vh; background: #fff; color: #333; padding: 12px; box-sizing: border-box; position: relative; z-index: 10; display: flex; flex-direction: column; justify-content: space-between; }
+        .header { font-size: 16px; font-weight: bold; display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;}
+        #status { font-size: 13px; color: #666; font-weight: normal;}
         
-        #passwords-list { width: 100%; height: 120px; box-sizing: border-box; padding: 10px; border: 1px solid #ccc; border-radius: 8px; font-family: monospace; font-size: 15px; resize: none; margin-bottom: 10px; }
+        #camera-select { width: 100%; padding: 10px; border-radius: 8px; border: 1px solid #ccc; font-size: 14px; margin-bottom: 10px; background: #fff; }
+        #passwords-list { width: 100%; flex-grow: 1; height: 100px; box-sizing: border-box; padding: 8px; border: 1px solid #ccc; border-radius: 8px; font-family: monospace; font-size: 15px; resize: none; margin-bottom: 8px; }
         
-        .btn-group { display: flex; gap: 10px; }
-        .btn { flex: 1; padding: 12px; border: none; border-radius: 8px; font-size: 15px; font-weight: bold; cursor: pointer; text-align: center; text-decoration: none;}
+        .btn-group { display: flex; gap: 8px; }
+        .btn { flex: 1; padding: 12px; border: none; border-radius: 8px; font-size: 14px; font-weight: bold; cursor: pointer; text-align: center; text-decoration: none;}
         .btn-success { background: #25D366; color: white; }
         .btn-secondary { background: #f0f2f5; color: #333; border: 1px solid #ccc;}
-        
-        /* Прихований canvas для обрізки зображення */
-        #crop-canvas { display: none; }
     </style>
 </head>
 <body>
@@ -52,23 +57,27 @@
         <div id="scanner-overlay">
             <div id="reticle"></div>
         </div>
+        <div id="preview-container">
+            <canvas id="crop-canvas"></canvas>
+        </div>
     </div>
 
     <div id="controls">
-        <div class="header">
-            <span>Зібрані паролі</span>
-            <span id="status">Ініціалізація камери...</span>
+        <div>
+            <div class="header">
+                <span>Оберіть камеру (спробуйте х2):</span>
+                <span id="status">Запуск...</span>
+            </div>
+            <select id="camera-select"><option>Завантаження камер...</option></select>
         </div>
         
-        <textarea id="passwords-list" readonly placeholder="Паролі з'являтимуться тут автоматично..."></textarea>
+        <textarea id="passwords-list" readonly placeholder="Паролі з'являтимуться тут..."></textarea>
         
         <div class="btn-group">
             <button class="btn btn-secondary" onclick="clearList()">Очистити</button>
             <button class="btn btn-success" onclick="sendToWhatsApp()">💬 Відправити у WhatsApp</button>
         </div>
     </div>
-
-    <canvas id="crop-canvas"></canvas>
 
     <script>
         const video = document.getElementById('video');
@@ -77,120 +86,177 @@
         const statusDiv = document.getElementById('status');
         const passwordsList = document.getElementById('passwords-list');
         const reticle = document.getElementById('reticle');
+        const cameraSelect = document.getElementById('camera-select');
 
         let worker = null;
         let isProcessing = false;
         let lastScannedPassword = "";
         let scanTimer = null;
+        let currentStream = null;
 
-        // 1. Ініціалізація Tesseract з ОПТИМІЗАЦІЯМИ
+        // 1. Ініціалізація швидкого Tesseract
         async function initOCR() {
-            statusDiv.innerText = "⏳ Завантаження мозку...";
-            worker = await Tesseract.createWorker('eng', 1, {
-                // logger: m => console.log(m) // розкоментуйте для відладки
-            });
+            statusDiv.innerText = "⏳ Налаштування OCR...";
+            worker = await Tesseract.createWorker('eng', 1);
             
-            // КРИТИЧНО ДЛЯ ШВИДКОСТІ: Білий список символів та режим єдиного рядка
             await worker.setParameters({
-                tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789Password: ', // Тільки ці символи
-                tessedit_pageseg_mode: Tesseract.PSM.SINGLE_LINE, // Шукаємо один рядок
+                // Великі літери, цифри, двокрапка та пробіл
+                tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789Password: ',
+                tessedit_pageseg_mode: Tesseract.PSM.SINGLE_LINE,
             });
             
-            statusDiv.innerText = "✅ Готовий до сканування";
+            statusDiv.innerText = "🟢 Сканування активне";
             statusDiv.style.color = "green";
             startScanningLoop();
         }
 
-        // 2. Запуск камери
-        async function startCamera() {
+        // 2. Отримання списку камер та запуск обраної
+        async function initCameraSystem() {
             try {
-                const stream = await navigator.mediaDevices.getUserMedia({ 
-                    video: { 
-                        facingMode: "environment", // Задня камера
-                        width: { ideal: 1280 }, // Оптимальна роздільна здатність (не космос)
-                        height: { ideal: 720 }
-                    }, 
-                    audio: false 
-                });
-                video.srcObject = stream;
+                // Запитуємо доступ до камери спочатку, щоб отримати дозволи
+                currentStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio: false });
+                video.srcObject = currentStream;
                 await video.play();
+
+                // Отримуємо всі камери після надання дозволу
+                const devices = await navigator.mediaDevices.enumerateDevices();
+                const videoDevices = devices.filter(device => device.kind === 'videoinput');
+
+                cameraSelect.innerHTML = "";
+                videoDevices.forEach((device, index) => {
+                    const option = document.createElement('option');
+                    option.value = device.deviceId;
+                    // Спробуємо підписати камери зрозуміліше
+                    option.text = device.label || `Камера ${index + 1}`;
+                    cameraSelect.appendChild(option);
+                });
+
+                // Якщо є більше однієї камери, вибираємо останню (часто це додаткові модулі/зум)
+                if (videoDevices.length > 1) {
+                    cameraSelect.selectedIndex = videoDevices.length - 1;
+                    await switchCamera(cameraSelect.value);
+                }
+
                 initOCR();
             } catch (err) {
-                statusDiv.innerText = "❌ Помилка камери. Потрібен HTTPS!";
+                statusDiv.innerText = "❌ Помилка доступу до камери.";
                 statusDiv.style.color = "red";
                 console.error(err);
             }
         }
 
-        // 3. Цикл сканування (працює кожні 500мс)
+        // Перемикання камери
+        async function switchCamera(deviceId) {
+            if (currentStream) {
+                currentStream.getTracks().forEach(track => track.stop());
+            }
+
+            statusDiv.innerText = "🔄 Перемикання камери...";
+            
+            const constraints = {
+                video: {
+                    deviceId: { exact: deviceId },
+                    width: { ideal: 1920 },
+                    height: { ideal: 1080 }
+                },
+                audio: false
+            };
+
+            try {
+                currentStream = await navigator.mediaDevices.getUserMedia(constraints);
+                video.srcObject = currentStream;
+                await video.play();
+                statusDiv.innerText = "🟢 Сканування активне";
+            } catch (err) {
+                statusDiv.innerText = "❌ Помилка цієї камери.";
+                statusDiv.style.color = "red";
+            }
+        }
+
+        cameraSelect.addEventListener('change', (e) => {
+            switchCamera(e.target.value);
+        });
+
+        // 3. Цикл обробки кадрів
         function startScanningLoop() {
+            if (scanTimer) clearInterval(scanTimer);
             scanTimer = setInterval(async () => {
                 if (isProcessing || !worker) return;
                 await processFrame();
-            }, 500); // Час між спробами сканування
+            }, 600); // Оптимальний інтервал (трохи більше пів секунди)
         }
 
-        // 4. Основна магія: Обрізка та розпізнавання
+        // 4. Обрізка та OCR
         async function processFrame() {
             isProcessing = true;
             
-            // Вираховуємо координати рамки (reticle) відносно відео
             const videoWidth = video.videoWidth;
             const videoHeight = video.videoHeight;
             const displayWidth = video.clientWidth;
             const displayHeight = video.clientHeight;
             
+            if (!videoWidth || !videoHeight) {
+                isProcessing = false;
+                return;
+            }
+
             const scaleX = videoWidth / displayWidth;
             const scaleY = videoHeight / displayHeight;
             
             const reticleRect = reticle.getBoundingClientRect();
             const videoRect = video.getBoundingClientRect();
             
-            // Координати обрізки
             const sx = (reticleRect.left - videoRect.left) * scaleX;
             const sy = (reticleRect.top - videoRect.top) * scaleY;
             const sw = reticleRect.width * scaleX;
             const sh = reticleRect.height * scaleY;
 
-            // Налаштовуємо canvas під розмір рамки
             canvas.width = sw;
             canvas.height = sh;
 
-            // Малюємо в canvas тільки область рамки
+            // Малюємо обрізану рамку
             ctx.drawImage(video, sx, sy, sw, sh, 0, 0, sw, sh);
             
-            // Попередня обробка зображення (збільшення контрасту для Tesseract)
-            // (можна додати фільтри тут, якщо буде погано зчитувати)
+            // --- ПОКРАЩЕННЯ ЗОБРАЖЕННЯ ДЛЯ OCR ---
+            // Переводимо картинку в чіткий контраст (чорно-білий фільтр у браузері)
+            const imgData = ctx.getImageData(0, 0, sw, sh);
+            const data = imgData.data;
+            for (let i = 0; i < data.length; i += 4) {
+                // Простий алгоритм перетворення на сірий та поріг яскравості
+                const brightness = 0.34 * data[i] + 0.5 * data[i + 1] + 0.16 * data[i + 2];
+                const threshold = 120; // поріг яскравості
+                const color = brightness > threshold ? 255 : 0;
+                data[i] = color;     // R
+                data[i + 1] = color; // G
+                data[i + 2] = color; // B
+            }
+            ctx.putImageData(imgData, 0, 0);
+            // -------------------------------------
 
-            // Конвертуємо canvas в картинку в пам'яті
-            const imageData = canvas.toDataURL('image/png');
+            const base64Image = canvas.toDataURL('image/png');
 
             try {
-                // OCR аналіз КРИХІТНОЇ картинки
-                const { data: { text } } = await worker.recognize(imageData);
-                
-                // Чистимо текст
+                const { data: { text } } = await worker.recognize(base64Image);
                 const cleanText = text.trim();
                 
-                // Точна перевірка: чи починається рядок з Password:
-                if (cleanText.startsWith("Password:")) {
-                    // Витягуємо все, що після "Password:"
-                    let password = cleanText.replace("Password:", "").trim();
-                    
-                    // Відкидаємо сміття в кінці, якщо воно є
-                    password = password.split(' ')[0]; 
+                // Регулярний вираз: шукає слово "Password" (ігнорує регістр), двокрапку або пробіл, 
+                // та групу з ВЕЛИКИХ літер та цифр від 4 до 20 символів.
+                const regex = /password\s*:\s*([A-Z0-9]{4,20})/i;
+                const match = cleanText.match(regex);
 
-                    // Якщо пароль нормальної довжини і це не той самий, що ми щойно зчитали
-                    if (password.length >= 4 && password !== lastScannedPassword) {
+                if (match && match[1]) {
+                    const password = match[1];
+
+                    if (password !== lastScannedPassword) {
                         addPasswordToList(password);
                         
-                        // Візуальний відгук (рамка блимає)
-                        reticle.style.borderColor = "#fff";
-                        setTimeout(() => reticle.style.borderColor = "#00ff00", 200);
+                        // Підсвічуємо рамку зеленим при успіху
+                        reticle.style.borderColor = "#25D366";
+                        setTimeout(() => reticle.style.borderColor = "#00ff00", 400);
                     }
                 }
             } catch (ocrErr) {
-                console.error("OCR Error:", ocrErr);
+                console.error("Помилка OCR:", ocrErr);
             }
 
             isProcessing = false;
@@ -202,35 +268,29 @@
                 passwordsList.value += "\n";
             }
             passwordsList.value += pass;
-            
-            // Скролимо вниз
             passwordsList.scrollTop = passwordsList.scrollHeight;
-            
-            // Зберігаємо в пам'ять браузера на випадок перезавантаження
-            localStorage.setItem('router_passwords_list', passwordsList.value);
+            localStorage.setItem('router_passwords_list_v2', passwordsList.value);
         }
         
         function clearList() {
-            if(confirm("Очистити весь список?")) {
+            if(confirm("Очистити список?")) {
                 passwordsList.value = "";
-                localStorage.removeItem('router_passwords_list');
+                localStorage.removeItem('router_passwords_list_v2');
                 lastScannedPassword = "";
             }
         }
 
-        // Відновлення даних при старті
         window.onload = () => {
-            const saved = localStorage.getItem('router_passwords_list');
+            const saved = localStorage.getItem('router_passwords_list_v2');
             if (saved) passwordsList.value = saved;
-            startCamera();
+            initCameraSystem();
         };
 
-        // Відправка у WhatsApp
         function sendToWhatsApp() {
             const text = passwordsList.value.trim();
             if (!text) return alert("Список порожній!");
             
-            const encodedText = encodeURIComponent("Паролі від роутерів (A-Z, 0-9):\n\n" + text);
+            const encodedText = encodeURIComponent("Знайдені паролі:\n\n" + text);
             const whatsappUrl = `https://api.whatsapp.com/send?text=${encodedText}`;
             window.open(whatsappUrl, '_blank');
         }
