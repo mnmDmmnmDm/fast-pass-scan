@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Експрес Сканер Роутерів</title>
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+    <style>
+        body { font-family: sans-serif; margin: 0; padding: 0; background: #000; color: white; overflow: hidden; }
+        
+        /* Контейнер для відео */
+        #video-container { position: relative; width: 100vw; height: 60vh; background: #000; }
+        video { width: 100%; height: 100%; object-fit: cover; }
+        
+        /* Візуальна рамка сканера */
+        #scanner-overlay {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            display: flex; align-items: center; justify-content: center;
+            box-sizing: border-box;
+        }
+        #reticle {
+            width: 80%; height: 60px; /* Вузька область для пароля */
+            border: 3px solid #00ff00; border-radius: 8px;
+            box-shadow: 0 0 0 1000px rgba(0, 0, 0, 0.6); /* Затемнення навколо */
+            position: relative;
+        }
+        #reticle::before {
+            content: "Наведіть на Password:"; position: absolute; top: -25px; left: 0;
+            color: #00ff00; font-size: 14px; font-weight: bold; width: 100%; text-align: center;
+        }
+
+        /* Нижня панель з результатами */
+        #controls { height: 40vh; background: #fff; color: #333; padding: 15px; box-sizing: border-box; border-top-radius: 15px; position: relative; z-index: 10; }
+        .header { font-size: 18px; font-weight: bold; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center;}
+        #status { font-size: 14px; color: #666; font-weight: normal;}
+        
+        #passwords-list { width: 100%; height: 120px; box-sizing: border-box; padding: 10px; border: 1px solid #ccc; border-radius: 8px; font-family: monospace; font-size: 15px; resize: none; margin-bottom: 10px; }
+        
+        .btn-group { display: flex; gap: 10px; }
+        .btn { flex: 1; padding: 12px; border: none; border-radius: 8px; font-size: 15px; font-weight: bold; cursor: pointer; text-align: center; text-decoration: none;}
+        .btn-success { background: #25D366; color: white; }
+        .btn-secondary { background: #f0f2f5; color: #333; border: 1px solid #ccc;}
+        
+        /* Прихований canvas для обрізки зображення */
+        #crop-canvas { display: none; }
+    </style>
+</head>
+<body>
+
+    <div id="video-container">
+        <video id="video" autoplay playsinline muted></video>
+        <div id="scanner-overlay">
+            <div id="reticle"></div>
+        </div>
+    </div>
+
+    <div id="controls">
+        <div class="header">
+            <span>Зібрані паролі</span>
+            <span id="status">Ініціалізація камери...</span>
+        </div>
+        
+        <textarea id="passwords-list" readonly placeholder="Паролі з'являтимуться тут автоматично..."></textarea>
+        
+        <div class="btn-group">
+            <button class="btn btn-secondary" onclick="clearList()">Очистити</button>
+            <button class="btn btn-success" onclick="sendToWhatsApp()">💬 Відправити у WhatsApp</button>
+        </div>
+    </div>
+
+    <canvas id="crop-canvas"></canvas>
+
+    <script>
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('crop-canvas');
+        const ctx = canvas.getContext('2d');
+        const statusDiv = document.getElementById('status');
+        const passwordsList = document.getElementById('passwords-list');
+        const reticle = document.getElementById('reticle');
+
+        let worker = null;
+        let isProcessing = false;
+        let lastScannedPassword = "";
+        let scanTimer = null;
+
+        // 1. Ініціалізація Tesseract з ОПТИМІЗАЦІЯМИ
+        async function initOCR() {
+            statusDiv.innerText = "⏳ Завантаження мозку...";
+            worker = await Tesseract.createWorker('eng', 1, {
+                // logger: m => console.log(m) // розкоментуйте для відладки
+            });
+            
+            // КРИТИЧНО ДЛЯ ШВИДКОСТІ: Білий список символів та режим єдиного рядка
+            await worker.setParameters({
+                tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789Password: ', // Тільки ці символи
+                tessedit_pageseg_mode: Tesseract.PSM.SINGLE_LINE, // Шукаємо один рядок
+            });
+            
+            statusDiv.innerText = "✅ Готовий до сканування";
+            statusDiv.style.color = "green";
+            startScanningLoop();
+        }
+
+        // 2. Запуск камери
+        async function startCamera() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ 
+                    video: { 
+                        facingMode: "environment", // Задня камера
+                        width: { ideal: 1280 }, // Оптимальна роздільна здатність (не космос)
+                        height: { ideal: 720 }
+                    }, 
+                    audio: false 
+                });
+                video.srcObject = stream;
+                await video.play();
+                initOCR();
+            } catch (err) {
+                statusDiv.innerText = "❌ Помилка камери. Потрібен HTTPS!";
+                statusDiv.style.color = "red";
+                console.error(err);
+            }
+        }
+
+        // 3. Цикл сканування (працює кожні 500мс)
+        function startScanningLoop() {
+            scanTimer = setInterval(async () => {
+                if (isProcessing || !worker) return;
+                await processFrame();
+            }, 500); // Час між спробами сканування
+        }
+
+        // 4. Основна магія: Обрізка та розпізнавання
+        async function processFrame() {
+            isProcessing = true;
+            
+            // Вираховуємо координати рамки (reticle) відносно відео
+            const videoWidth = video.videoWidth;
+            const videoHeight = video.videoHeight;
+            const displayWidth = video.clientWidth;
+            const displayHeight = video.clientHeight;
+            
+            const scaleX = videoWidth / displayWidth;
+            const scaleY = videoHeight / displayHeight;
+            
+            const reticleRect = reticle.getBoundingClientRect();
+            const videoRect = video.getBoundingClientRect();
+            
+            // Координати обрізки
+            const sx = (reticleRect.left - videoRect.left) * scaleX;
+            const sy = (reticleRect.top - videoRect.top) * scaleY;
+            const sw = reticleRect.width * scaleX;
+            const sh = reticleRect.height * scaleY;
+
+            // Налаштовуємо canvas під розмір рамки
+            canvas.width = sw;
+            canvas.height = sh;
+
+            // Малюємо в canvas тільки область рамки
+            ctx.drawImage(video, sx, sy, sw, sh, 0, 0, sw, sh);
+            
+            // Попередня обробка зображення (збільшення контрасту для Tesseract)
+            // (можна додати фільтри тут, якщо буде погано зчитувати)
+
+            // Конвертуємо canvas в картинку в пам'яті
+            const imageData = canvas.toDataURL('image/png');
+
+            try {
+                // OCR аналіз КРИХІТНОЇ картинки
+                const { data: { text } } = await worker.recognize(imageData);
+                
+                // Чистимо текст
+                const cleanText = text.trim();
+                
+                // Точна перевірка: чи починається рядок з Password:
+                if (cleanText.startsWith("Password:")) {
+                    // Витягуємо все, що після "Password:"
+                    let password = cleanText.replace("Password:", "").trim();
+                    
+                    // Відкидаємо сміття в кінці, якщо воно є
+                    password = password.split(' ')[0]; 
+
+                    // Якщо пароль нормальної довжини і це не той самий, що ми щойно зчитали
+                    if (password.length >= 4 && password !== lastScannedPassword) {
+                        addPasswordToList(password);
+                        
+                        // Візуальний відгук (рамка блимає)
+                        reticle.style.borderColor = "#fff";
+                        setTimeout(() => reticle.style.borderColor = "#00ff00", 200);
+                    }
+                }
+            } catch (ocrErr) {
+                console.error("OCR Error:", ocrErr);
+            }
+
+            isProcessing = false;
+        }
+
+        function addPasswordToList(pass) {
+            lastScannedPassword = pass;
+            if (passwordsList.value.trim() !== "") {
+                passwordsList.value += "\n";
+            }
+            passwordsList.value += pass;
+            
+            // Скролимо вниз
+            passwordsList.scrollTop = passwordsList.scrollHeight;
+            
+            // Зберігаємо в пам'ять браузера на випадок перезавантаження
+            localStorage.setItem('router_passwords_list', passwordsList.value);
+        }
+        
+        function clearList() {
+            if(confirm("Очистити весь список?")) {
+                passwordsList.value = "";
+                localStorage.removeItem('router_passwords_list');
+                lastScannedPassword = "";
+            }
+        }
+
+        // Відновлення даних при старті
+        window.onload = () => {
+            const saved = localStorage.getItem('router_passwords_list');
+            if (saved) passwordsList.value = saved;
+            startCamera();
+        };
+
+        // Відправка у WhatsApp
+        function sendToWhatsApp() {
+            const text = passwordsList.value.trim();
+            if (!text) return alert("Список порожній!");
+            
+            const encodedText = encodeURIComponent("Паролі від роутерів (A-Z, 0-9):\n\n" + text);
+            const whatsappUrl = `https://api.whatsapp.com/send?text=${encodedText}`;
+            window.open(whatsappUrl, '_blank');
+        }
+    </script>
+</body>
+</html>
